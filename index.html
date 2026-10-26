@@ -1,0 +1,1033 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!--
+  SECURITY: This Content-Security-Policy tells the browser to block every
+  network request this page could make (fetch, XHR, WebSocket, external
+  scripts, fonts, form posts). The only things it may load are this app's
+  own icon, install manifest and offline service worker, from the same
+  site ('self'). No other site can be contacted. See "Verify this page"
+  at the bottom.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>Dice Entropy Check</title>
+<meta name="description" content="Offline fairness test for dice used in Bitcoin seed generation.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Dice Check">
+<meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131211" media="(prefers-color-scheme: dark)">
+<script>
+// Apply a saved light/dark choice before the page draws, so it doesn't flash the wrong theme.
+try { const t = localStorage.getItem("dice-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+<style>
+:root {
+  --bg: #f6f5f2;
+  --surface: #ffffff;
+  --surface-2: #efede8;
+  --border: #dcd8d0;
+  --text: #1d1c1a;
+  --muted: #6b6760;
+  --accent: #d97706;
+  --accent-ink: #ffffff;
+  --good: #15803d;
+  --good-bg: #e8f5ec;
+  --bad: #b91c1c;
+  --bad-bg: #fdeceb;
+  --warn: #a16207;
+  --warn-bg: #fdf6e3;
+  --hi: #c2410c;
+  --lo: #2563eb;
+  --bar: #8a8579;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color-scheme: light;
+}
+/* Dark theme: used when the system prefers dark (unless the user picked light), or when the user picked dark. */
+:root[data-theme="dark"] {
+  --bg: #131211;
+  --surface: #1c1b19;
+  --surface-2: #262522;
+  --border: #36342f;
+  --text: #ece9e3;
+  --muted: #9c978d;
+  --accent: #f59e0b;
+  --accent-ink: #1a1203;
+  --good: #4ade80;
+  --good-bg: #13261a;
+  --bad: #f87171;
+  --bad-bg: #2b1414;
+  --warn: #facc15;
+  --warn-bg: #2a2410;
+  --hi: #fb923c;
+  --lo: #60a5fa;
+  --bar: #6f6a60;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131211;
+    --surface: #1c1b19;
+    --surface-2: #262522;
+    --border: #36342f;
+    --text: #ece9e3;
+    --muted: #9c978d;
+    --accent: #f59e0b;
+    --accent-ink: #1a1203;
+    --good: #4ade80;
+    --good-bg: #13261a;
+    --bad: #f87171;
+    --bad-bg: #2b1414;
+    --warn: #facc15;
+    --warn-bg: #2a2410;
+    --hi: #fb923c;
+    --lo: #60a5fa;
+    --bar: #6f6a60;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 var(--sans);
+  -webkit-text-size-adjust: 100%;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 20px 16px 48px; }
+header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
+.titles { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; flex: 1 1 auto; min-width: 0; }
+.theme-btn {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; font-size: 13px; border-radius: 99px; color: var(--muted);
+}
+.theme-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.theme-btn:hover { color: var(--text); }
+/* The button shows the theme you'll switch TO: a moon in light mode, a sun in dark mode. */
+.theme-btn .sun, :root[data-theme-now="dark"] .theme-btn .moon { display: none; }
+:root[data-theme-now="dark"] .theme-btn .sun { display: block; }
+h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+h3 { font-size: 15px; margin: 18px 0 6px; }
+.sub { color: var(--muted); font-size: 14px; }
+.banner {
+  background: var(--warn-bg); border: 1px solid var(--border); border-left: 4px solid var(--warn);
+  border-radius: 8px; padding: 10px 14px; margin-bottom: 18px; font-size: 14px;
+}
+.grid { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.stack > * + * { margin-top: 18px; }
+.field { display: block; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+.tiprow { position: relative; }
+.seg { border: 0; margin: 0; padding: 0; min-width: 0; }
+.seg legend { font-size: 13px; color: var(--muted); padding: 0; margin-bottom: 4px; }
+.seg-opts { display: flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 3px; gap: 3px; }
+.seg-opts label { flex: 1 1 0; position: relative; cursor: pointer; }
+.seg-opts input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.seg-opts span { display: block; text-align: center; padding: 6px 8px; border-radius: 6px; font-size: 14px; color: var(--muted); }
+.seg-opts span code { background: transparent; padding: 0; font-size: 12px; }
+.seg-opts input:checked + span { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+.seg-opts input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.seg-opts input:disabled + span { opacity: 0.4; cursor: not-allowed; }
+.seg .note { margin-top: 6px; }
+.field > input, .field > select {
+  display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+}
+.row { display: flex; gap: 10px; flex-wrap: wrap; }
+.row > .field { flex: 1 1 120px; }
+button {
+  font: inherit; color: var(--text); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button.danger { color: var(--bad); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+.small { font-size: 13px; padding: 5px 9px; }
+
+/* Entry pad */
+.pad { display: grid; gap: 8px; }
+.pad button {
+  position: relative; min-height: 64px; padding: 10px 4px 16px;
+  font-family: var(--mono); font-size: 19px; font-weight: 600; letter-spacing: 0.04em;
+  background: var(--surface-2); touch-action: manipulation; user-select: none; -webkit-user-select: none;
+}
+.pad button .cnt { position: absolute; left: 0; right: 0; bottom: 4px; font: 11px var(--sans); color: var(--muted); letter-spacing: 0; font-weight: 400; }
+.pad button.flash { background: var(--accent); color: var(--accent-ink); }
+.pad button.flash .cnt { color: var(--accent-ink); }
+.last { display: flex; gap: 6px; flex-wrap: wrap; min-height: 30px; margin: 12px 0 10px; align-items: center; }
+.chip { font-family: var(--mono); font-size: 13px; padding: 3px 7px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); }
+.chip.newest { border-color: var(--accent); }
+.hint { font-size: 13px; color: var(--muted); }
+.kbd { font-family: var(--mono); font-size: 12px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+details { margin-top: 12px; }
+summary { cursor: pointer; font-size: 14px; }
+textarea {
+  width: 100%; min-height: 110px; margin: 8px 0; font: 13px var(--mono); color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+}
+.msg { font-size: 13px; margin-top: 6px; }
+.msg.err { color: var(--bad); }
+.msg.ok { color: var(--good); }
+
+/* Results */
+.verdict { border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; border: 1px solid var(--border); background: var(--surface-2); }
+.verdict strong { display: block; font-size: 17px; margin-bottom: 2px; }
+.verdict.pass { background: var(--good-bg); border-color: var(--good); }
+.verdict.pass strong { color: var(--good); }
+.verdict.fail { background: var(--bad-bg); border-color: var(--bad); }
+.verdict.fail strong { color: var(--bad); }
+.verdict.pending strong { color: var(--warn); }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+@media (max-width: 520px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tiles { position: relative; }
+.tile { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; }
+.info {
+  width: 17px; height: 17px; padding: 0; margin-left: 5px; vertical-align: 1px;
+  border-radius: 50%; border: 1px solid var(--muted); background: transparent;
+  color: var(--muted); font: 600 10px/15px var(--sans); text-align: center;
+}
+.info:hover, .info.open { border-color: var(--accent); color: var(--accent); }
+/* The tip is positioned against the whole row of tiles, so it never runs off-screen. */
+.tip {
+  display: none; position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 5;
+  background: var(--text); color: var(--bg); font-size: 13px; line-height: 1.5;
+  padding: 10px 12px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.25);
+}
+.info:hover + .tip, .info:focus-visible + .tip, .info.open + .tip { display: block; }
+.tile .k { font-size: 12px; color: var(--muted); }
+.tile .v { font: 600 20px/1.3 var(--mono); }
+.tile .s { font-size: 12px; color: var(--muted); }
+.progress { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin: -6px 0 14px; }
+.progress > div { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+
+.chart { position: relative; height: 170px; display: flex; align-items: flex-end; gap: 3px; padding-top: 6px; border-bottom: 1px solid var(--border); }
+.chart .col { flex: 1 1 0; height: 100%; display: flex; align-items: flex-end; }
+.chart .bar { width: 100%; background: var(--bar); border-radius: 3px 3px 0 0; min-height: 1px; }
+.chart .bar.hi { background: var(--hi); }
+.chart .bar.lo { background: var(--lo); }
+.chart .exp { position: absolute; left: 0; right: 0; border-top: 2px dashed var(--accent); pointer-events: none; }
+.chart .exp span { position: absolute; right: 0; top: -18px; font-size: 11px; color: var(--accent); background: var(--surface); padding: 0 4px; }
+.xlabels { display: flex; gap: 3px; margin-top: 4px; }
+.xlabels span { flex: 1 1 0; font: 10px var(--mono); color: var(--muted); text-align: center; writing-mode: vertical-rl; transform: rotate(180deg); height: 38px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+th { font-weight: 600; color: var(--muted); font-size: 12px; }
+td.num, th.num { text-align: right; font-family: var(--mono); }
+.tbl-scroll { overflow-x: auto; }
+.flag { font-family: var(--mono); }
+.flag.hi { color: var(--hi); }
+.flag.lo { color: var(--lo); }
+.pill { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 99px; font-weight: 600; }
+.pill.ok { background: var(--good-bg); color: var(--good); }
+.pill.bad { background: var(--bad-bg); color: var(--bad); }
+.pill.na { background: var(--surface-2); color: var(--muted); }
+.note { font-size: 13px; color: var(--muted); }
+.runs td .act { display: flex; gap: 6px; flex-wrap: wrap; }
+footer { margin-top: 24px; }
+footer .card + .card { margin-top: 14px; }
+footer p, footer li { font-size: 14px; }
+code { font-family: var(--mono); font-size: 13px; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+pre { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); padding: 10px; border-radius: 8px; overflow-x: auto; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="titles">
+  <h1>Dice Entropy Check</h1>
+  <span class="sub">Fairness test for dice used in Bitcoin seed generation · v1.0 · runs fully offline</span>
+  </div>
+  <button id="themeBtn" class="theme-btn" type="button" aria-label="Switch to dark mode">
+    <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    <span id="themeLbl">Dark</span>
+  </button>
+</header>
+
+<div class="banner">
+  <strong>Test rolls only.</strong> Never enter the rolls you will use for a real seed, here or in any other tool.
+  This page tests whether a die is fair. Roll it separately when you generate your seed.
+</div>
+
+<div class="grid">
+  <!-- LEFT: setup + entry -->
+  <div class="stack">
+    <section class="card" aria-labelledby="setup-h">
+      <h2 id="setup-h">Setup</h2>
+      <label class="field">Die / roll description
+        <input id="desc" type="text" maxlength="120" placeholder="e.g. Die #2, rolled into felt tray">
+      </label>
+      <div class="row tiprow">
+        <label class="field">Sides
+          <select id="sides">
+            <option value="2">2</option>
+            <option value="4">4</option>
+            <option value="6">6</option>
+            <option value="8">8</option>
+            <option value="10">10</option>
+            <option value="12">12</option>
+            <option value="16" selected>16</option>
+            <option value="20">20</option>
+          </select>
+        </label>
+        <div class="field">
+          <label for="alpha">Significance level (α)</label><button class="info" type="button" aria-label="What is the significance level?" aria-describedby="tipA">?</button><span class="tip" role="tooltip" id="tipA">
+            How strict the test is. It is the chance of failing a die that is actually fair: at 0.05, about 1 in 20 fair dice will fail just by bad luck.
+            0.01 means fewer false alarms, but a bad die needs a bigger bias (or more rolls) before it gets caught.
+            0.10 catches problems sooner but fails more fair dice. 0.05 is the standard choice.
+            The per-bit test splits this level across the bits (α ÷ 4 on a D16).</span>
+          <select id="alpha">
+            <option value="0.01">0.01</option>
+            <option value="0.05" selected>0.05</option>
+            <option value="0.10">0.10</option>
+          </select>
+        </div>
+      </div>
+      <fieldset class="seg" id="labelsSet">
+        <legend>Show faces as</legend>
+        <div class="seg-opts">
+          <label><input type="radio" name="labels" value="bin" checked><span>Binary <code>0000</code></span></label>
+          <label><input type="radio" name="labels" value="num"><span>Face number <code>1</code></span></label>
+        </div>
+        <div class="note" id="labelsNote" hidden>Binary labels are only available for dice with 2, 4, 8 or 16 sides.</div>
+      </fieldset>
+    </section>
+
+    <section class="card" aria-labelledby="entry-h">
+      <h2 id="entry-h">Record rolls</h2>
+      <div id="pad" class="pad" role="group" aria-label="Face buttons"></div>
+      <div class="last" id="last" aria-live="polite"></div>
+      <div class="row">
+        <button id="undo" title="Remove the last roll (Backspace)">Undo last</button>
+        <button id="clear" class="danger">Clear all</button>
+        <button id="save" class="primary">Save run</button>
+      </div>
+      <p class="hint" id="kbhint"></p>
+      <details>
+        <summary>Paste or import a list of rolls</summary>
+        <div class="row" style="margin-top:8px">
+          <label class="field">Format
+            <select id="pfmt">
+              <option value="bin">Binary (0000–1111)</option>
+              <option value="num">Face number (1–N)</option>
+              <option value="hex">Hex digit (0–F)</option>
+            </select>
+          </label>
+        </div>
+        <textarea id="paste" placeholder="One roll per line, or separated by spaces/commas"></textarea>
+        <div class="row">
+          <button id="pAppend">Add to current rolls</button>
+          <button id="pReplace">Replace current rolls</button>
+        </div>
+        <div id="pmsg" class="msg"></div>
+      </details>
+    </section>
+  </div>
+
+  <!-- RIGHT: results + saved runs -->
+  <div class="stack">
+    <section class="card" aria-labelledby="res-h">
+      <h2 id="res-h">Results</h2>
+      <div id="verdict" class="verdict"></div>
+      <div class="tiles">
+        <div class="tile"><div class="k">Rolls</div><div class="v" id="tN">0</div><div class="s" id="tNs"></div></div>
+        <div class="tile"><div class="k">Chi-square<button class="info" type="button" aria-label="What is chi-square?" aria-describedby="tipX">?</button><span class="tip" role="tooltip" id="tipX">
+          Measures how uneven the counts are. For each face it takes (observed − expected)² ÷ expected, then adds them up.
+          0 would be a perfectly even spread. A fair die usually lands somewhere near the degrees of freedom (df = sides − 1, so about 15 on a D16).
+          The further above that, the more uneven the counts.</span></div><div class="v" id="tX">–</div><div class="s" id="tXs"></div></div>
+        <div class="tile"><div class="k">p-value<button class="info" type="button" aria-label="What is the p-value?" aria-describedby="tipP">?</button><span class="tip" role="tooltip" id="tipP">
+          The chance that a perfectly fair die would produce results at least this uneven.
+          A high value (say 0.65) means your results look like ordinary randomness. A value below α (e.g. 0.05) means a fair die would do this less than 5% of the time, so the die is flagged.
+          It is not the probability that your die is fair.</span></div><div class="v" id="tP">–</div><div class="s" id="tPs"></div></div>
+        <div class="tile"><div class="k">Detectable bias<button class="info" type="button" aria-label="What is detectable bias?" aria-describedby="tipD">?</button><span class="tip" role="tooltip" id="tipD">
+          Roughly the smallest skew in a single face that your current number of rolls would reliably catch (about 80% of the time at the 5% level).
+          <span id="tipDx">Smaller is better.</span>
+          Quadrupling the number of rolls cuts this number in half.</span></div><div class="v" id="tD">–</div><div class="s">per face, approx.</div></div>
+      </div>
+      <div class="progress" aria-hidden="true"><div id="prog"></div></div>
+
+      <div class="chart" id="chart" role="img" aria-label="Observed count for each face compared with the expected count"></div>
+      <div class="xlabels" id="xlabels" aria-hidden="true"></div>
+      <div class="legend">
+        <span><i style="background:var(--bar)"></i>Observed</span>
+        <span><i style="background:var(--hi)"></i>&gt; 1.5× expected</span>
+        <span><i style="background:var(--lo)"></i>&lt; 0.5× expected</span>
+        <span><i style="background:var(--accent)"></i>Expected (dashed)</span>
+      </div>
+
+      <div id="flags"></div>
+
+      <div id="bitsWrap">
+        <h3>Per-bit test</h3>
+        <p class="note">Each bit position on a binary die should land on 1 exactly half the time. A die weighted toward one side
+          usually shows up here first, because each bit gets n samples instead of n/16.</p>
+        <div class="tbl-scroll"><table id="bits"></table></div>
+        <p class="note" id="bitsNote"></p>
+      </div>
+
+      <details>
+        <summary>Full table</summary>
+        <div class="tbl-scroll"><table id="full"></table></div>
+      </details>
+
+      <div class="row" style="margin-top:14px">
+        <button id="copy" class="small">Copy result summary</button>
+        <button id="csvCur" class="small">Download rolls (CSV)</button>
+      </div>
+      <div id="copymsg" class="msg"></div>
+    </section>
+
+    <section class="card" aria-labelledby="runs-h">
+      <h2 id="runs-h">Saved runs</h2>
+      <p class="note">Saved in this browser only (local storage). Nothing leaves your device. Export a backup to keep them.</p>
+      <div class="tbl-scroll"><table class="runs" id="runs"></table></div>
+      <div class="row" style="margin-top:12px">
+        <button id="exportAll" class="small">Export all (JSON)</button>
+        <button id="importBtn" class="small">Import JSON…</button>
+        <input id="importFile" type="file" accept=".json,application/json" class="sr" tabindex="-1">
+      </div>
+      <div id="runmsg" class="msg"></div>
+    </section>
+  </div>
+</div>
+
+<footer>
+  <section class="card" aria-labelledby="ver-h">
+    <h2 id="ver-h">Verify this page</h2>
+    <p>Don't trust, verify. Here is what you can check yourself:</p>
+    <ol>
+      <li><strong>It's one file.</strong> All the logic is in this one page: no external scripts, fonts or libraries. Open it in a text editor and read it; the logic is a few hundred lines of plain JavaScript in the <code>&lt;script&gt;</code> block at the bottom. The installable version adds only an icon, a small manifest, and <code>sw.js</code>, a ~50-line script that stores the app's own files for offline use.</li>
+      <li><strong>Network access is blocked by the browser.</strong> The <code>Content-Security-Policy</code> tag at the top sets <code>default-src 'none'</code>, so the browser refuses any fetch, XHR, WebSocket, beacon, font or form submission, even if code tried one. The only exceptions are the app's own icon, manifest and <code>sw.js</code>, from the same site. CSP does not cover a page navigating itself to a new address, so also confirm the code never assigns to <code>location</code>, calls <code>window.open</code>, or links to outside sites. Search for <code>http</code>: apart from this text and the <code>http-equiv</code> tag itself, the only match is a check that the page is served over https before offering offline install.</li>
+      <li><strong>Test it offline.</strong> Save the file (or install the app), turn on airplane mode or unplug your network, and open it. Everything works.</li>
+      <li><strong>Check the hash.</strong> Compare the file's SHA-256 against the hash the author published and signed:
+        <pre>shasum -a 256 dice-entropy-check.html        # macOS / Linux
+certutil -hashfile dice-entropy-check.html SHA256   # Windows</pre>
+        The downloadable file and the website's <code>index.html</code> are byte-for-byte the same, so they share one hash.</li>
+      <li><strong>Check the math.</strong> Use <em>Download rolls (CSV)</em> and run the same chi-square test in any stats tool, e.g. Python: <code>scipy.stats.chisquare(counts)</code>.</li>
+    </ol>
+  </section>
+
+  <section class="card" aria-labelledby="about-h">
+    <h2 id="about-h">How to use it</h2>
+    <ul>
+      <li>Roll the die the same way you'll roll it for real (same surface, same cup or tray), and tap the face that comes up. On a keyboard you can type the face as a hex digit instead (e.g. <span class="kbd">b</span> for 1011).</li>
+      <li>The minimum is 10× the number of sides (160 rolls for a D16). That only catches large problems. More rolls detect smaller biases; the <em>Detectable bias</em> tile shows roughly how large a skew your current sample would reliably catch.</li>
+      <li>The chi-square test asks whether the spread of results is consistent with every face having equal probability. A p-value below α means the result would be unusual for a fair die. At α = 0.05, about 1 in 20 fair dice will still fail by chance, so re-test a die that fails before discarding it.</li>
+      <li>A single run passing does not prove a die is perfect. It means no bias large enough to detect at that sample size was found.</li>
+      <li><strong>Install it as an app</strong> (when opened from the website): on iPhone or iPad, tap Share, then <em>Add to Home Screen</em>. On Android or desktop Chrome/Edge, use <em>Install app</em> in the browser menu. After the first visit it works with no connection.</li>
+    </ul>
+    <p class="note">Built by @ChuckinBitcoin (Nostr & X). Statistics based on the original chi-square fair-die spreadsheet by @ineedanewgame.<br>
+      Live app: <code>dice.cypherhive.com</code> · Source code, releases and hashes: <code>github.com/ChuckinBits/dice-entropy-check</code> (MIT license).
+      These are written as plain text, not links, so the page contains no outside links at all.</p>
+  </section>
+</footer>
+</div>
+
+<script>
+"use strict";
+/*
+ * Dice Entropy Check — all logic lives here.
+ * No network calls. No external code. Data is stored only in this
+ * browser's localStorage and in files you choose to download.
+ */
+
+// ---------- Statistics ----------
+
+// Natural log of the gamma function (Lanczos approximation).
+function lnGamma(z) {
+  const g = 7;
+  const c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+    771.32342877765313, -176.61502916214059, 12.507343278686905,
+    -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+  if (z < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * z)) - lnGamma(1 - z);
+  z -= 1;
+  let x = c[0];
+  for (let i = 1; i < g + 2; i++) x += c[i] / (z + i);
+  const t = z + g + 0.5;
+  return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
+}
+
+// Regularized upper incomplete gamma Q(a, x) = 1 - P(a, x).
+function gammaQ(a, x) {
+  if (x <= 0) return 1;
+  const EPS = 1e-15, FPMIN = 1e-300;
+  if (x < a + 1) {
+    // Series for P(a, x)
+    let ap = a, sum = 1 / a, del = sum;
+    for (let n = 0; n < 1000; n++) {
+      ap += 1; del *= x / ap; sum += del;
+      if (Math.abs(del) < Math.abs(sum) * EPS) break;
+    }
+    return 1 - sum * Math.exp(-x + a * Math.log(x) - lnGamma(a));
+  }
+  // Continued fraction for Q(a, x) (modified Lentz)
+  let b = x + 1 - a, c = 1 / FPMIN, d = 1 / b, h = d;
+  for (let i = 1; i < 1000; i++) {
+    const an = -i * (i - a);
+    b += 2;
+    d = an * d + b; if (Math.abs(d) < FPMIN) d = FPMIN;
+    c = b + an / c; if (Math.abs(c) < FPMIN) c = FPMIN;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < EPS) break;
+  }
+  return Math.exp(-x + a * Math.log(x) - lnGamma(a)) * h;
+}
+
+// p-value of a chi-square statistic with df degrees of freedom (same as Excel CHIDIST).
+function chiSquareP(x2, df) { return gammaQ(df / 2, x2 / 2); }
+
+function analyze(rolls, sides) {
+  const n = rolls.length;
+  const counts = new Array(sides).fill(0);
+  for (const r of rolls) counts[r]++;
+  const expected = n / sides;
+  let x2 = 0;
+  if (n > 0) for (const o of counts) x2 += (o - expected) ** 2 / expected;
+  const df = sides - 1;
+  const p = n > 0 ? chiSquareP(x2, df) : NaN;
+
+  // Per-bit test (only for power-of-two dice with 2+ bits)
+  const bits = Math.log2(sides);
+  const bitStats = [];
+  if (Number.isInteger(bits) && bits >= 2 && n > 0) {
+    for (let b = bits - 1; b >= 0; b--) {           // most significant bit first
+      let ones = 0;
+      for (const r of rolls) ones += (r >> b) & 1;
+      const z = (ones - n / 2) / Math.sqrt(n / 4);
+      bitStats.push({ pos: bits - b, ones, share: ones / n, z, p: chiSquareP(z * z, 1) });
+    }
+  }
+
+  // Approximate smallest relative bias in a single face detectable with
+  // ~80% power at a two-sided 5% level: delta = 2.8 * sqrt((1 - p0) / (n * p0)).
+  const p0 = 1 / sides;
+  const detectable = n > 0 ? 2.8 * Math.sqrt((1 - p0) / (n * p0)) : NaN;
+  const bitDetectable = n > 0 ? 2.8 * 0.5 / Math.sqrt(n) : NaN;   // absolute, e.g. 0.05 = 55/45
+
+  return { n, counts, expected, x2, df, p, bitStats, detectable, bitDetectable };
+}
+
+// ---------- State & storage ----------
+
+const LS_CUR = "dice-current-v1";
+const LS_RUNS = "dice-runs-v1";
+
+function lsGet(key, fallback) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch (e) { return fallback; }
+}
+function lsSet(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+  catch (e) { return false; }
+}
+
+const state = Object.assign({ sides: 16, alpha: 0.05, desc: "", rolls: [], labels: "bin" }, lsGet(LS_CUR, {}));
+let runs = lsGet(LS_RUNS, []);
+if (!Array.isArray(runs)) runs = [];
+sanitizeState();
+
+function sanitizeState() {
+  const allowed = [2, 4, 6, 8, 10, 12, 16, 20];
+  if (!allowed.includes(state.sides)) state.sides = 16;
+  if (![0.01, 0.05, 0.1].includes(state.alpha)) state.alpha = 0.05;
+  if (typeof state.desc !== "string") state.desc = "";
+  if (state.labels !== "bin" && state.labels !== "num") state.labels = "bin";
+  if (!Array.isArray(state.rolls)) state.rolls = [];
+  state.rolls = state.rolls.filter(r => Number.isInteger(r) && r >= 0 && r < state.sides);
+}
+function persist() { lsSet(LS_CUR, state); }
+
+// ---------- Labels ----------
+
+function bitCount(sides) { const b = Math.log2(sides); return Number.isInteger(b) ? b : 0; }
+// Binary labels (e.g. 1011) when the die supports them and the user chose binary; otherwise face numbers 1..N.
+function label(i, sides) {
+  const b = bitCount(sides);
+  return b && state.labels === "bin" ? i.toString(2).padStart(b, "0") : String(i + 1);
+}
+function usingBinary() { return bitCount(state.sides) > 0 && state.labels === "bin"; }
+function fmtP(p) {
+  if (!Number.isFinite(p)) return "–";
+  if (p < 0.0001) return "<0.0001";
+  return p.toFixed(4);
+}
+function pct(x, d = 1) { return (x * 100).toFixed(d) + "%"; }
+
+// ---------- DOM helpers ----------
+
+const $ = id => document.getElementById(id);
+function el(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  if (props) for (const [k, v] of Object.entries(props)) {
+    if (k === "class") e.className = v;
+    else if (k === "style") e.style.cssText = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  }
+  for (const k of kids) if (k != null) e.append(k);   // append() treats strings as text, never HTML
+  return e;
+}
+function setMsg(node, text, kind) { node.textContent = text; node.className = "msg" + (kind ? " " + kind : ""); }
+
+// ---------- Entry ----------
+
+function buildPad() {
+  const pad = $("pad");
+  pad.replaceChildren();
+  const cols = state.sides === 16 ? 4 : state.sides <= 4 ? state.sides : state.sides === 6 ? 3 : 4;
+  pad.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+  for (let i = 0; i < state.sides; i++) {
+    const lab = label(i, state.sides);
+    pad.append(el("button", { type: "button", "data-face": i, "aria-label": "Face " + lab, onclick: () => addRoll(i) },
+      lab, el("span", { class: "cnt" }, "0")));
+  }
+  const b = bitCount(state.sides);
+  const maxHex = (state.sides - 1).toString(16).toUpperCase();
+  $("kbhint").replaceChildren(
+    b && state.sides <= 16
+      ? (usingBinary()
+          ? "Keyboard: type the face as a hex digit (0–" + maxHex + "), Backspace to undo."
+          : "Keyboard: type a hex digit, 0 for face 1 up to " + maxHex + " for face " + state.sides + ". Backspace to undo.")
+      : state.sides <= 9 ? "Keyboard: type 1–" + state.sides + ", Backspace to undo." : "Keyboard: Backspace to undo.");
+  $("pfmt").value = usingBinary() ? "bin" : "num";
+
+  // Label switch: binary only makes sense for 2, 4, 8 or 16 sides.
+  const binRadio = document.querySelector('input[name="labels"][value="bin"]');
+  binRadio.disabled = !b;
+  $("labelsNote").hidden = !!b;
+  document.querySelector('input[name="labels"][value="' + (usingBinary() ? "bin" : "num") + '"]').checked = true;
+}
+
+document.querySelectorAll('input[name="labels"]').forEach(r => r.addEventListener("change", e => {
+  state.labels = e.target.value; persist(); buildPad(); render();
+}));
+
+function addRoll(i) {
+  state.rolls.push(i);
+  persist();
+  const btn = $("pad").querySelector(`[data-face="${i}"]`);
+  if (btn) { btn.classList.add("flash"); setTimeout(() => btn.classList.remove("flash"), 120); }
+  if (navigator.vibrate) { try { navigator.vibrate(8); } catch (e) {} }
+  render();
+}
+
+document.addEventListener("keydown", e => {
+  const t = e.target;
+  if (t && ((t.tagName === "INPUT" && t.type !== "radio") || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "Backspace") { e.preventDefault(); undo(); return; }
+  if (e.key.length !== 1) return;
+  const k = e.key.toLowerCase();
+  if (bitCount(state.sides) && state.sides <= 16) {
+    const v = parseInt(k, 16);
+    if (!Number.isNaN(v) && /^[0-9a-f]$/.test(k) && v < state.sides) { e.preventDefault(); addRoll(v); }
+  } else if (state.sides <= 9 && /^[1-9]$/.test(k)) {
+    const v = Number(k) - 1;
+    if (v < state.sides) { e.preventDefault(); addRoll(v); }
+  }
+});
+
+function undo() { if (state.rolls.length) { state.rolls.pop(); persist(); render(); } }
+$("undo").addEventListener("click", undo);
+$("clear").addEventListener("click", () => {
+  if (!state.rolls.length && !state.desc) return;
+  const what = state.rolls.length ? "all " + state.rolls.length + " current rolls and the description" : "the description";
+  if (confirm("Clear " + what + "? Saved runs are not affected.")) {
+    state.rolls = []; state.desc = ""; $("desc").value = ""; persist(); render();
+  }
+});
+
+$("desc").addEventListener("input", e => {
+  state.desc = e.target.value; persist();
+  $("clear").disabled = !state.rolls.length && !state.desc;
+});
+$("alpha").addEventListener("change", e => { state.alpha = Number(e.target.value); persist(); render(); });
+$("sides").addEventListener("change", e => {
+  const s = Number(e.target.value);
+  if (state.rolls.length && !confirm("Changing the number of sides clears the " + state.rolls.length + " current rolls. Continue?")) {
+    e.target.value = String(state.sides); return;
+  }
+  state.sides = s; state.rolls = []; persist(); buildPad(); render();
+});
+
+// Paste / import list
+function parseList(text, fmt, sides) {
+  const tokens = text.split(/[\s,;]+/).filter(Boolean);
+  const out = [], bad = [];
+  const b = bitCount(sides);
+  for (const tok of tokens) {
+    let v = NaN;
+    if (fmt === "bin") { if (/^[01]+$/.test(tok) && (!b || tok.length <= b)) v = parseInt(tok, 2); }
+    else if (fmt === "hex") { if (/^[0-9a-fA-F]$/.test(tok)) v = parseInt(tok, 16); }
+    else { if (/^\d+$/.test(tok)) v = Number(tok) - 1; }
+    if (Number.isInteger(v) && v >= 0 && v < sides) out.push(v); else bad.push(tok);
+  }
+  return { out, bad, total: tokens.length };
+}
+function doPaste(replace) {
+  const res = parseList($("paste").value, $("pfmt").value, state.sides);
+  const m = $("pmsg");
+  if (!res.total) { setMsg(m, "Nothing to import.", "err"); return; }
+  if (res.bad.length) {
+    setMsg(m, res.bad.length + " value(s) aren't valid for this die and format, e.g. " +
+      res.bad.slice(0, 5).map(s => JSON.stringify(s)).join(", ") + ". Nothing was imported.", "err");
+    return;
+  }
+  state.rolls = replace ? res.out : state.rolls.concat(res.out);
+  persist(); render();
+  setMsg(m, "Imported " + res.out.length + " rolls.", "ok");
+  $("paste").value = "";
+}
+$("pAppend").addEventListener("click", () => doPaste(false));
+$("pReplace").addEventListener("click", () => {
+  if (state.rolls.length && !confirm("Replace the " + state.rolls.length + " current rolls?")) return;
+  doPaste(true);
+});
+
+// ---------- Render ----------
+
+function render() {
+  const { sides, rolls, alpha } = state;
+  const a = analyze(rolls, sides);
+  const target = sides * 10;
+
+  // Pad counts
+  $("pad").querySelectorAll("button").forEach((btn, i) => { btn.querySelector(".cnt").textContent = a.counts[i]; });
+
+  // Last rolls
+  const last = rolls.slice(-8).reverse();
+  $("last").replaceChildren(...(last.length
+    ? last.map((r, i) => el("span", { class: "chip" + (i === 0 ? " newest" : "") }, label(r, sides)))
+    : [el("span", { class: "hint" }, "No rolls yet. Tap a face to record a roll.")]));
+  $("undo").disabled = !rolls.length;
+  $("clear").disabled = !rolls.length && !state.desc;
+  $("save").disabled = !rolls.length;
+
+  // Tiles
+  $("tN").textContent = a.n;
+  $("tNs").textContent = a.n >= target ? "minimum reached (" + target + ")" : (target - a.n) + " to minimum (" + target + ")";
+  $("prog").style.width = Math.min(100, a.n / target * 100) + "%";
+  $("tX").textContent = a.n ? a.x2.toFixed(2) : "–";
+  $("tXs").textContent = "df = " + a.df;
+  $("tP").textContent = fmtP(a.p);
+  $("tPs").textContent = "α = " + alpha;
+  $("tD").textContent = a.n ? "±" + pct(a.detectable, 0) : "–";
+  if (a.n) {
+    const lo = Math.max(0, 1 - a.detectable), hi = 1 + a.detectable;
+    $("tipDx").textContent = "Right now (" + a.n + " rolls), a face would have to come up about " + pct(a.detectable, 0) +
+      " more or less often than it should before you'd likely notice: " +
+      (lo > 0 ? "1 in " + (sides / hi).toFixed(1) + " or 1 in " + (sides / lo).toFixed(1) : "1 in " + (sides / hi).toFixed(1) + " or almost never") +
+      " instead of 1 in " + sides + ".";
+  } else {
+    $("tipDx").textContent = "Smaller is better.";
+  }
+
+  // Over/under & unseen
+  const hi = [], lo = [], unseen = [];
+  a.counts.forEach((c, i) => {
+    if (c === 0) unseen.push(label(i, sides));
+    if (a.n && c > 1.5 * a.expected) hi.push(label(i, sides));
+    if (a.n && c < 0.5 * a.expected) lo.push(label(i, sides));
+  });
+  const bitFails = a.bitStats.filter(s => s.p < alpha / a.bitStats.length);
+
+  // Verdict
+  const v = $("verdict");
+  if (!a.n) {
+    v.className = "verdict";
+    v.replaceChildren(el("strong", null, "No data yet"), "Record at least " + target + " rolls to run the test.");
+  } else if (a.n < target) {
+    v.className = "verdict pending";
+    v.replaceChildren(el("strong", null, "Need more rolls to detect bias"),
+      "Preliminary p-value " + fmtP(a.p) + ". " + (target - a.n) + " more rolls to reach the minimum of " + target + ".");
+  } else if (a.p < alpha) {
+    v.className = "verdict fail";
+    v.replaceChildren(el("strong", null, "Not equally distributed"),
+      "p = " + fmtP(a.p) + " is below α = " + alpha + ". Some faces appear to have different probabilities. Re-test with a fresh run before discarding the die.");
+  } else {
+    v.className = "verdict pass";
+    v.replaceChildren(el("strong", null, "Within expectation for a fair die"),
+      "p = " + fmtP(a.p) + " at α = " + alpha + ". No bias detected at this sample size" +
+      (bitFails.length ? ", but see the per-bit test below." : "."));
+  }
+
+  // Chart
+  const chart = $("chart");
+  const max = Math.max(1, ...a.counts, a.expected * 1.6);
+  const cols = a.counts.map((c, i) => {
+    const cls = a.n && c > 1.5 * a.expected ? " hi" : a.n && c < 0.5 * a.expected ? " lo" : "";
+    return el("div", { class: "col", title: label(i, sides) + ": " + c + " (expected " + a.expected.toFixed(1) + ")" },
+      el("div", { class: "bar" + cls, style: "height:" + (c / max * 100) + "%" }));
+  });
+  const children = [...cols];
+  if (a.n) children.push(el("div", { class: "exp", style: "bottom:" + (a.expected / max * 100) + "%" },
+    el("span", null, "expected " + a.expected.toFixed(1))));
+  chart.replaceChildren(...children);
+  $("xlabels").replaceChildren(...a.counts.map((_, i) => el("span", null, label(i, sides))));
+
+  // Flags
+  const flags = $("flags");
+  const items = [];
+  if (a.n && a.n < target) items.push(el("p", { class: "note" }, "Flags below are preliminary until you reach " + target + " rolls."));
+  if (a.n && a.expected < 5) items.push(el("p", { class: "note" }, "Expected count per face is under 5, so the chi-square p-value is unreliable. Keep rolling."));
+  if (unseen.length && a.n) items.push(el("p", null, "Faces not seen yet: ", el("span", { class: "flag" }, unseen.join(" "))));
+  items.push(el("p", null, "Faces above 1.5× expected: ",
+    hi.length ? el("span", { class: "flag hi" }, hi.join(" ")) : el("span", { class: "note" }, "none")));
+  items.push(el("p", null, "Faces below 0.5× expected: ",
+    lo.length ? el("span", { class: "flag lo" }, lo.join(" ")) : el("span", { class: "note" }, "none")));
+  items.push(el("p", { class: "note" }, "A die can pass the overall test and still show a face or two outside these bands, especially with fewer rolls. Watch for the same faces repeating across runs."));
+  flags.replaceChildren(...(a.n ? items : []));
+
+  // Bits
+  const bw = $("bitsWrap");
+  if (a.bitStats.length) {
+    bw.hidden = false;
+    const thr = alpha / a.bitStats.length;
+    $("bits").replaceChildren(
+      el("thead", null, el("tr", null,
+        el("th", null, "Bit"), el("th", { class: "num" }, "1s"), el("th", { class: "num" }, "0s"),
+        el("th", { class: "num" }, "% ones"), el("th", { class: "num" }, "p-value"), el("th", null, ""))),
+      el("tbody", null, ...a.bitStats.map(s => el("tr", null,
+        el("td", null, "Bit " + s.pos + (s.pos === 1 ? " (left)" : s.pos === a.bitStats.length ? " (right)" : "")),
+        el("td", { class: "num" }, String(s.ones)), el("td", { class: "num" }, String(a.n - s.ones)),
+        el("td", { class: "num" }, pct(s.share)), el("td", { class: "num" }, fmtP(s.p)),
+        el("td", null, a.n < target ? el("span", { class: "pill na" }, "prelim")
+          : s.p < thr ? el("span", { class: "pill bad" }, "skewed") : el("span", { class: "pill ok" }, "ok"))))));
+    $("bitsNote").textContent = "A bit is flagged when p < " + +thr.toFixed(4) + " (α ÷ " + a.bitStats.length +
+      " bits, to avoid false alarms from testing several bits). At this sample size you can reliably catch a bit landing about " +
+      pct(0.5 + a.bitDetectable, 1) + " / " + pct(0.5 - a.bitDetectable, 1) + " or worse.";
+  } else {
+    bw.hidden = true;
+  }
+
+  // Full table
+  $("full").replaceChildren(
+    el("thead", null, el("tr", null, el("th", null, "Face"), el("th", { class: "num" }, "Observed"),
+      el("th", { class: "num" }, "Expected"), el("th", { class: "num" }, "O − E"),
+      el("th", { class: "num" }, "(O−E)²/E"), el("th", { class: "num" }, "Observed %"))),
+    el("tbody", null, ...a.counts.map((c, i) => el("tr", null,
+      el("td", { class: "flag" }, label(i, sides)), el("td", { class: "num" }, String(c)),
+      el("td", { class: "num" }, a.expected.toFixed(2)), el("td", { class: "num" }, (c - a.expected).toFixed(2)),
+      el("td", { class: "num" }, a.n ? ((c - a.expected) ** 2 / a.expected).toFixed(3) : "–"),
+      el("td", { class: "num" }, a.n ? pct(c / a.n, 2) : "–")))));
+
+  renderRuns();
+  return a;
+}
+
+// ---------- Copy summary / CSV ----------
+
+function summaryText(rolls, sides, alpha, desc) {
+  const a = analyze(rolls, sides);
+  const target = sides * 10;
+  const verdict = a.n < target ? "not enough rolls (minimum " + target + ")"
+    : a.p < alpha ? "NOT equally distributed" : "within expectation for a fair die";
+  const lines = [
+    "Dice Entropy Check" + (desc ? " — " + desc : ""),
+    "D" + sides + ", " + a.n + " rolls",
+    "Chi-square = " + a.x2.toFixed(2) + " (df " + a.df + "), p = " + fmtP(a.p) + " → " + verdict + " at α = " + alpha,
+    "Counts: " + a.counts.map((c, i) => label(i, sides) + ":" + c).join(" "),
+  ];
+  if (a.bitStats.length) lines.push("Bits (% ones): " + a.bitStats.map(s => "b" + s.pos + " " + pct(s.share)).join(", "));
+  return lines.join("\n");
+}
+
+$("copy").addEventListener("click", async () => {
+  const text = summaryText(state.rolls, state.sides, state.alpha, state.desc);
+  const m = $("copymsg");
+  try { await navigator.clipboard.writeText(text); setMsg(m, "Summary copied.", "ok"); }
+  catch (e) {
+    const ta = el("textarea", { style: "position:fixed;opacity:0" }); ta.value = text;
+    document.body.append(ta); ta.select();
+    let ok = false; try { ok = document.execCommand("copy"); } catch (e2) {}
+    ta.remove();
+    setMsg(m, ok ? "Summary copied." : "Couldn't access the clipboard in this browser.", ok ? "ok" : "err");
+  }
+});
+
+function download(filename, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = el("a", { href: url, download: filename });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function safeName(s) { return (s || "dice").replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-").slice(0, 60) || "dice"; }
+function rollsCsv(rolls, sides) {
+  const out = ["roll,face_label,face_number"];
+  rolls.forEach((r, i) => out.push((i + 1) + "," + label(r, sides) + "," + (r + 1)));
+  return out.join("\n") + "\n";
+}
+$("csvCur").addEventListener("click", () => {
+  if (!state.rolls.length) return;
+  download(safeName(state.desc) + "-rolls.csv", rollsCsv(state.rolls, state.sides), "text/csv");
+});
+
+// ---------- Saved runs ----------
+
+function saveRuns() {
+  if (!lsSet(LS_RUNS, runs)) setMsg($("runmsg"), "Couldn't save to this browser's storage. Use Export to keep a copy.", "err");
+}
+
+$("save").addEventListener("click", () => {
+  if (!state.rolls.length) return;
+  let desc = state.desc.trim();
+  if (!desc) {
+    desc = (prompt("Describe this run (die, surface, how it was rolled):") || "").trim();
+    if (!desc) return;
+    state.desc = desc; $("desc").value = desc; persist();
+  }
+  runs.unshift({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    desc, sides: state.sides, rolls: state.rolls.slice(), savedAt: new Date().toISOString() });
+  saveRuns(); renderRuns();
+  if (confirm("Run saved. Clear the current rolls to start a new run?")) { state.rolls = []; persist(); render(); }
+});
+
+function renderRuns() {
+  const t = $("runs");
+  if (!runs.length) { t.replaceChildren(el("tbody", null, el("tr", null, el("td", { class: "note" }, "No saved runs yet.")))); return; }
+  t.replaceChildren(
+    el("thead", null, el("tr", null, el("th", null, "Description"), el("th", { class: "num" }, "Rolls"),
+      el("th", { class: "num" }, "p-value"), el("th", null, "Result"), el("th", null, ""))),
+    el("tbody", null, ...runs.map(r => {
+      const a = analyze(r.rolls, r.sides);
+      const target = r.sides * 10;
+      const res = a.n < target ? el("span", { class: "pill na" }, "too few")
+        : a.p < state.alpha ? el("span", { class: "pill bad" }, "fail") : el("span", { class: "pill ok" }, "pass");
+      return el("tr", null,
+        el("td", null, r.desc, el("div", { class: "note" }, "D" + r.sides + " · " + new Date(r.savedAt).toLocaleString())),
+        el("td", { class: "num" }, String(a.n)), el("td", { class: "num" }, fmtP(a.p)), el("td", null, res),
+        el("td", null, el("div", { class: "act" },
+          el("button", { class: "small", onclick: () => loadRun(r) }, "Load"),
+          el("button", { class: "small", onclick: () => download(safeName(r.desc) + "-rolls.csv", rollsCsv(r.rolls, r.sides), "text/csv") }, "CSV"),
+          el("button", { class: "small danger", onclick: () => deleteRun(r) }, "Delete"))));
+    })));
+}
+
+function loadRun(r) {
+  if (state.rolls.length && !confirm("Replace the " + state.rolls.length + " current rolls with this saved run?")) return;
+  state.sides = r.sides; state.rolls = r.rolls.slice(); state.desc = r.desc;
+  $("sides").value = String(r.sides); $("desc").value = r.desc;
+  persist(); buildPad(); render();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+function deleteRun(r) {
+  if (!confirm("Delete saved run \"" + r.desc + "\"? This can't be undone unless you exported it.")) return;
+  runs = runs.filter(x => x.id !== r.id); saveRuns(); renderRuns();
+}
+
+$("exportAll").addEventListener("click", () => {
+  if (!runs.length) { setMsg($("runmsg"), "No saved runs to export.", "err"); return; }
+  download("dice-entropy-runs-" + new Date().toISOString().slice(0, 10) + ".json",
+    JSON.stringify({ app: "dice-entropy-check", version: 1, runs }, null, 2), "application/json");
+});
+$("importBtn").addEventListener("click", () => $("importFile").click());
+$("importFile").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const m = $("runmsg");
+    try {
+      const data = JSON.parse(reader.result);
+      const list = Array.isArray(data) ? data : data.runs;
+      if (!Array.isArray(list)) throw new Error("no runs");
+      const allowed = [2, 4, 6, 8, 10, 12, 16, 20];
+      let added = 0, skipped = 0;
+      for (const r of list) {
+        const ok = r && typeof r.desc === "string" && allowed.includes(r.sides) && Array.isArray(r.rolls) &&
+          r.rolls.every(x => Number.isInteger(x) && x >= 0 && x < r.sides);
+        if (!ok) { skipped++; continue; }
+        const id = typeof r.id === "string" ? r.id : Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        if (runs.some(x => x.id === id)) { skipped++; continue; }
+        runs.push({ id, desc: r.desc.slice(0, 120), sides: r.sides, rolls: r.rolls.slice(),
+          savedAt: typeof r.savedAt === "string" ? r.savedAt : new Date().toISOString() });
+        added++;
+      }
+      runs.sort((x, y) => String(y.savedAt).localeCompare(String(x.savedAt)));
+      saveRuns(); renderRuns();
+      setMsg(m, "Imported " + added + " run(s)" + (skipped ? ", skipped " + skipped + " (invalid or already present)." : "."), "ok");
+    } catch (err) {
+      setMsg(m, "That file isn't a valid runs export.", "err");
+    }
+  };
+  reader.readAsText(f);
+});
+
+// ---------- Info tooltips (tap to toggle on touch screens) ----------
+
+function closeTips(except) {
+  document.querySelectorAll(".info.open").forEach(b => { if (b !== except) b.classList.remove("open"); });
+}
+document.querySelectorAll(".info").forEach(btn => btn.addEventListener("click", e => {
+  e.stopPropagation();
+  closeTips(btn);
+  btn.classList.toggle("open");
+}));
+document.addEventListener("click", () => closeTips());
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") { closeTips(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }
+});
+
+// ---------- Light / dark theme ----------
+// Follows the system setting until the user clicks the toggle; after that their choice is remembered.
+
+const darkQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+function currentTheme() {
+  const t = document.documentElement.dataset.theme;
+  return t === "light" || t === "dark" ? t : (darkQuery && darkQuery.matches ? "dark" : "light");
+}
+function updateThemeButton() {
+  const now = currentTheme();
+  document.documentElement.dataset.themeNow = now;
+  const next = now === "dark" ? "light" : "dark";
+  $("themeLbl").textContent = next === "dark" ? "Dark" : "Light";
+  $("themeBtn").setAttribute("aria-label", "Switch to " + next + " mode");
+}
+$("themeBtn").addEventListener("click", () => {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("dice-theme", next); } catch (e) {}
+  updateThemeButton();
+});
+if (darkQuery && darkQuery.addEventListener) darkQuery.addEventListener("change", updateThemeButton);
+updateThemeButton();
+
+// ---------- Offline install (PWA) ----------
+// When served from a website, register sw.js so the app keeps working with no connection.
+// Skipped when the file is opened directly from disk, where it already works offline.
+
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+
+// ---------- Init ----------
+
+$("sides").value = String(state.sides);
+$("alpha").value = String(state.alpha === 0.1 ? "0.10" : state.alpha);
+$("desc").value = state.desc;
+buildPad();
+render();
+</script>
+</body>
+</html>

@@ -25,7 +25,8 @@ more or less often than expected. Runs can be saved in your browser and exported
    browser refuses fetch, XHR, WebSocket, beacons, fonts and form posts. The only same-site files it may load are
    its own icon, manifest and `sw.js`. Confirm the code never assigns to `location` or calls `window.open`.
 3. **Test it offline.** Turn on airplane mode and open it. Everything works.
-4. **Check the hash** against `SHA256SUMS` and the author's signed announcement:
+4. **Check the hash** against `SHA256SUMS` and the author's
+   [signed Nostr announcement](#signed-announcement):
 
    ```sh
    shasum -a 256 --ignore-missing -c SHA256SUMS         # macOS / Linux
@@ -33,6 +34,29 @@ more or less often than expected. Runs can be saved in your browser and exported
    ```
 5. **Check the math.** Export your rolls as CSV and re-run the test elsewhere, e.g.
    `scipy.stats.chisquare(counts)` in Python. The p-values match SciPy to machine precision.
+
+## Signed announcement
+
+Each release's hash is also published in a Nostr note signed by the author's key, so a copy of
+this repo or website that's been tampered with can be caught even if GitHub or the domain were compromised.
+
+**v1.0.0** — [signed note on Nostr](https://njump.to/nevent1qqszm6gf3jev3mjjk3da2aztj9vztz8jpt5xnme9tj2gsncd3pe45yqpr4mhxue69uhkummnw3ezucnfw33k76twv4ezuum0vd5kzmp0qgsrldx2t2ae6jhctmp4v3fpz8jt07zx8xug5f9pux29xhawg6g575grqsqqqqqpa2p580)
+
+```
+1c4942b43136a238b161c8216ae1ea7aae0faea7c6c061ba9eba800166f6f78c  dice-entropy-check.html
+```
+
+How to check it:
+
+1. Hash your copy of the file (commands above) and confirm it matches the hash in the note.
+2. Open the note in any Nostr client. Clients verify the note's Schnorr signature automatically, so the text
+   can't have been altered since it was signed. To check it yourself, fetch the raw event JSON and verify
+   its signature with a command-line Nostr tool such as [`nak`](https://github.com/fiatjaf/nak).
+3. Confirm the note's author is the real @ChuckinBitcoin key: it's the same npub that posts as
+   @ChuckinBitcoin on Nostr and is linked from the author's other profiles. Watch out for look-alike accounts.
+
+A matching signature shows the file is the one the author published. It does not by itself prove the code is
+safe; that's what reading it (step 1 above) is for.
 
 ## Files
 
